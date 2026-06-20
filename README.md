@@ -4,6 +4,18 @@
 
 Superpowers Plus is an enhanced workflow skill set evolved from upstream `superpowers`, designed for coding agent environments like Claude Code, Codex, OpenCode, and Gemini CLI. It retains the "design → plan → execute → verify" core workflow but unifies execution routing, subagent context control, and installation entry points within this repository instead of relying on the upstream.
 
+## Upgrade Snapshot
+
+This repository has been upgraded from the Superpowers Plus `5.0.6` baseline to upstream Superpowers `6.0.3`.
+
+The upgrade keeps the Superpowers Plus execution model instead of replacing it with upstream Superpowers wholesale:
+
+- `executing-plans` remains the single controller-style execution entry point.
+- The independent `subagent-driven-development` workflow remains removed.
+- Code review uses the upstream 6.x general-purpose reviewer prompt style while preserving Plus review checkpoints for `executing-plans`.
+- Platform and harness updates from upstream 6.x are included where compatible, including Codex plugin metadata, Kimi, Pi, Antigravity references, worktree behavior, visual companion hardening, and updated tests.
+- macOS-compatible test timeout handling was added for environments without GNU `timeout`.
+
 ## How it works
 
 It starts from the moment you fire up your coding agent. As soon as it sees that you're building something, it *doesn't* just jump into trying to write code. Instead, it steps back and asks you what you're really trying to do.

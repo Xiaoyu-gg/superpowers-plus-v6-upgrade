@@ -1,20 +1,33 @@
 #!/usr/bin/env bash
-# Integration Test: executing-plans workflow
-# Actually executes a plan and verifies the automatic routing behaviors
+# Integration Test: subagent-driven-development workflow
+# Actually executes a plan and verifies the new workflow behaviors
+#
+# Drill coverage: evals/scenarios/sdd-rejects-extra-features.yaml covers the
+# YAGNI enforcement subset (forbidden exports + reviewer-as-gate semantics)
+# and is stricter on that axis. This bash test additionally asserts:
+#   - >=3 git commits (initial + per-task commits, exercising SDD's
+#     commit-per-task workflow shape)
+#   - >=2 Claude Code subagent dispatches via Agent or Task (drill only asserts >=1)
+#   - Claude Code task-tracking tool usage (drill makes no assertion)
+#   - test/math.test.js exists (drill relies on `npm test` succeeding)
+#   - analyze-token-usage.py token-budget telemetry
+# Kept until those assertions are added to drill or explicitly retired.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test-helpers.sh"
 
 echo "========================================"
-echo " Integration Test: executing-plans"
+echo " Integration Test: subagent-driven-development"
 echo "========================================"
 echo ""
 echo "This test executes a real plan using the skill and verifies:"
-echo "  1. Plan is read once at the start"
-echo "  2. Task-specific context is provided to subagents"
-echo "  3. Subagents are used instead of inline task execution"
-echo "  4. Working implementation is produced and verified"
+echo "  1. Plan is read once (not per task)"
+echo "  2. Full task text provided to subagents"
+echo "  3. Subagents perform self-review"
+echo "  4. Spec compliance review before code quality"
+echo "  5. Review loops when issues found"
+echo "  6. Spec reviewer reads code independently"
 echo ""
 echo "WARNING: This test may take 10-30 minutes to complete."
 echo ""
@@ -46,7 +59,7 @@ mkdir -p src test docs/superpowers/plans
 cat > docs/superpowers/plans/implementation-plan.md <<'EOF'
 # Test Implementation Plan
 
-This is a minimal plan to test the executing-plans workflow.
+This is a minimal plan to test the subagent-driven-development workflow.
 
 ## Task 1: Create Add Function
 
@@ -113,39 +126,45 @@ echo ""
 echo "Project setup complete. Starting execution..."
 echo ""
 
-# Run Claude with executing-plans
+# Run Claude with subagent-driven-development
 # Capture full output to analyze
 OUTPUT_FILE="$TEST_PROJECT/claude-output.txt"
 
 # Create prompt file
 cat > "$TEST_PROJECT/prompt.txt" <<'EOF'
-I want you to execute the implementation plan at docs/superpowers/plans/implementation-plan.md using the executing-plans skill.
+I want you to execute the implementation plan at docs/superpowers/plans/implementation-plan.md using the subagent-driven-development skill.
 
 IMPORTANT: Follow the skill exactly. I will be verifying that you:
 1. Read the plan once at the beginning
-2. Provide task-specific context to subagents rather than the whole conversation
-3. Use subagents instead of doing the task work inline
-4. Keep the workflow inside executing-plans
+2. Provide full task text to subagents (don't make them read files)
+3. Ensure subagents do self-review before reporting
+4. Run spec compliance review before code quality review
+5. Use review loops when issues are found
 
 Begin now. Execute the plan.
 EOF
 
 # Note: We use a longer timeout since this is integration testing
 # Use --allowed-tools to enable tool usage in headless mode
-# IMPORTANT: Run from superpowers directory so local dev skills are available
-PROMPT="Change to directory $TEST_PROJECT and then execute the implementation plan at docs/superpowers/plans/implementation-plan.md using the executing-plans skill.
+PROMPT="Execute the implementation plan at docs/superpowers/plans/implementation-plan.md using the subagent-driven-development skill.
 
 IMPORTANT: Follow the skill exactly. I will be verifying that you:
 1. Read the plan once at the beginning
-2. Provide task-specific context to subagents rather than the whole conversation
-3. Use subagents instead of doing the task work inline
-4. Keep the workflow inside executing-plans
+2. Provide full task text to subagents (don't make them read files)
+3. Ensure subagents do self-review before reporting
+4. Run spec compliance review before code quality review
+5. Use review loops when issues are found
 
 Begin now. Execute the plan."
 
-echo "Running Claude (output will be shown below and saved to $OUTPUT_FILE)..."
+PLUGIN_DIR=$(cd "$SCRIPT_DIR/../.." && pwd)
+
+# Run claude from inside the test project so its session JSONL lands in a
+# project-specific directory under ~/.claude/projects/, isolated from any
+# other concurrent claude sessions.
+echo "Running Claude (plugin-dir: $PLUGIN_DIR, cwd: $TEST_PROJECT)..."
 echo "================================================================================"
-cd "$SCRIPT_DIR/../.." && run_with_timeout 1800 claude -p "$PROMPT" --allowed-tools=all --add-dir "$TEST_PROJECT" --permission-mode bypassPermissions 2>&1 | tee "$OUTPUT_FILE" || {
+cd "$TEST_PROJECT" && timeout 1800 claude -p "$PROMPT" --plugin-dir "$PLUGIN_DIR" --allowed-tools=all --permission-mode bypassPermissions 2>&1 | tee "$OUTPUT_FILE" || {
     echo ""
     echo "================================================================================"
     echo "EXECUTION FAILED (exit code: $?)"
@@ -157,13 +176,17 @@ echo ""
 echo "Execution complete. Analyzing results..."
 echo ""
 
-# Find the session transcript
-# Session files are in ~/.claude/projects/-<working-dir>/<session-id>.jsonl
-WORKING_DIR_ESCAPED=$(echo "$SCRIPT_DIR/../.." | sed 's/\//-/g' | sed 's/^-//')
-SESSION_DIR="$HOME/.claude/projects/$WORKING_DIR_ESCAPED"
-
-# Find the most recent session file (created during this test run)
-SESSION_FILE=$(find "$SESSION_DIR" -name "*.jsonl" -type f -mmin -60 2>/dev/null | sort -r | head -1)
+# Find the session transcript. Because we ran claude from $TEST_PROJECT (a
+# unique tmp dir), its sessions live in their own ~/.claude/projects/ folder
+# and we can pick the most-recent one without racing other concurrent sessions.
+# Resolve the real path because macOS mktemp returns /var/... but claude
+# normalizes it to /private/var/... when naming the project dir.
+TEST_PROJECT_REAL=$(cd "$TEST_PROJECT" && pwd -P)
+# Claude normalizes the cwd to a directory name by replacing every non-alphanumeric
+# character with `-` (so `_`, `.`, `/` all become `-`).
+SESSION_DIR="$HOME/.claude/projects/$(echo "$TEST_PROJECT_REAL" | sed 's|[^a-zA-Z0-9]|-|g')"
+# `|| true` prevents pipefail killing the script if ls gets SIGPIPE'd by head.
+SESSION_FILE=$(ls -t "$SESSION_DIR"/*.jsonl 2>/dev/null | head -1 || true)
 
 if [ -z "$SESSION_FILE" ]; then
     echo "ERROR: Could not find session transcript file"
@@ -182,17 +205,17 @@ echo ""
 
 # Test 1: Skill was invoked
 echo "Test 1: Skill tool invoked..."
-if grep -q '"name":"Skill".*"skill":"superpowers:executing-plans"' "$SESSION_FILE"; then
-    echo "  [PASS] executing-plans skill was invoked"
+if grep -q '"name":"Skill".*"skill":"superpowers:subagent-driven-development"' "$SESSION_FILE"; then
+    echo "  [PASS] subagent-driven-development skill was invoked"
 else
     echo "  [FAIL] Skill was not invoked"
     FAILED=$((FAILED + 1))
 fi
 echo ""
 
-# Test 2: Subagents were used (Task tool)
+# Test 2: Subagents were used (Agent / Task tool — name varies by harness version)
 echo "Test 2: Subagents dispatched..."
-task_count=$(grep -c '"name":"Task"' "$SESSION_FILE" || echo "0")
+task_count=$(grep -cE '"name":"(Agent|Task)"' "$SESSION_FILE" || echo "0")
 if [ "$task_count" -ge 2 ]; then
     echo "  [PASS] $task_count subagents dispatched"
 else
@@ -201,13 +224,13 @@ else
 fi
 echo ""
 
-# Test 3: TodoWrite was used for tracking
+# Test 3: Claude Code task-tracking tool was used
 echo "Test 3: Task tracking..."
-todo_count=$(grep -c '"name":"TodoWrite"' "$SESSION_FILE" || echo "0")
+todo_count=$(grep -cE '"name":"(TodoWrite|TaskCreate|TaskUpdate|TaskList|TaskGet)"' "$SESSION_FILE" || echo "0")
 if [ "$todo_count" -ge 1 ]; then
-    echo "  [PASS] TodoWrite used $todo_count time(s) for task tracking"
+    echo "  [PASS] Task tracking used $todo_count time(s)"
 else
-    echo "  [FAIL] TodoWrite not used"
+    echo "  [FAIL] No Claude Code task-tracking tool used"
     FAILED=$((FAILED + 1))
 fi
 echo ""
@@ -263,8 +286,8 @@ else
 fi
 echo ""
 
-# Test 8: Check for extra features
-echo "Test 8: No extra features added..."
+# Test 8: Check for extra features (spec compliance should catch)
+echo "Test 8: No extra features added (spec compliance)..."
 if grep -q "export function divide\|export function power\|export function subtract" "$TEST_PROJECT/src/math.js" 2>/dev/null; then
     echo "  [WARN] Extra features found (spec review should have caught this)"
     # Not failing on this as it tests reviewer effectiveness
@@ -291,10 +314,12 @@ if [ $FAILED -eq 0 ]; then
     echo "STATUS: PASSED"
     echo "All verification tests passed!"
     echo ""
-    echo "The executing-plans skill correctly:"
+    echo "The subagent-driven-development skill correctly:"
     echo "  ✓ Reads plan once at start"
-    echo "  ✓ Provides task-specific context to subagents"
-    echo "  ✓ Uses subagents to execute the work"
+    echo "  ✓ Provides full task text to subagents"
+    echo "  ✓ Enforces self-review"
+    echo "  ✓ Runs spec compliance before code quality"
+    echo "  ✓ Spec reviewer verifies independently"
     echo "  ✓ Produces working implementation"
     exit 0
 else

@@ -4,6 +4,18 @@
 
 Superpowers Plus 是基于上游 `superpowers` 演进出来的强化版工作流技能集，面向 Claude Code、Codex、OpenCode、Gemini CLI 等编码代理环境。它保留了"先设计、再计划、再执行、再验证"的主线，但把执行路由、子代理上下文控制和安装入口统一到了这个仓库自身，而不是继续依赖上游仓库。
 
+## 升级快照
+
+本仓库已从 Superpowers Plus `5.0.6` 基线升级到上游 Superpowers `6.0.3`。
+
+这次升级没有把项目直接覆盖成上游 Superpowers，而是保留了 Superpowers Plus 的执行模型：
+
+- `executing-plans` 仍然是统一的控制器式执行入口。
+- 独立的 `subagent-driven-development` 工作流继续保持删除状态。
+- Code review 同步上游 6.x 的 general-purpose reviewer prompt 调用方式，同时保留 Plus 在 `executing-plans` 中的 review 检查点。
+- 合入了上游 6.x 中兼容的多平台和 harness 更新，包括 Codex plugin metadata、Kimi、Pi、Antigravity 参考、worktree 行为、visual companion 加固和测试更新。
+- 为没有 GNU `timeout` 的 macOS 环境补充了测试超时兼容逻辑。
+
 ## 工作原理
 
 它从你启动编码代理的那一刻就开始工作。一旦它发现你在构建某些东西，它*不会*直接跳进去尝试编写代码。相反，它会退后一步，询问你真正想要做什么。

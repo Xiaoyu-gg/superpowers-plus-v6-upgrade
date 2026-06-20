@@ -12,9 +12,11 @@ Add superpowers-plus to the `plugin` array in your `opencode.json` (global or pr
 }
 ```
 
-Restart OpenCode. The plugin auto-installs via Bun and registers all skills automatically.
+Restart OpenCode. The plugin installs through OpenCode's plugin manager and registers all skills.
 
 Verify by asking: "Tell me about your superpowers plus"
+
+OpenCode uses its own plugin install. If you also use Claude Code, Codex, or another harness, install Superpowers Plus separately for each one.
 
 ### Migrating from the old symlink-based install
 
@@ -46,7 +48,7 @@ use skill tool to list skills
 ### Loading a Skill
 
 ```
-use skill tool to load superpowers-plus/brainstorming
+use skill tool to load brainstorming
 ```
 
 ### Personal Skills
@@ -78,7 +80,7 @@ Create project-specific skills in `.opencode/skills/` within your project.
 
 ## Updating
 
-Superpowers Plus updates automatically when you restart OpenCode. The plugin is re-installed from the git repository on each launch.
+OpenCode installs Superpowers Plus through a git-backed package spec. Some OpenCode and Bun versions pin that resolved git dependency in a lockfile or cache, so a restart may not pick up the newest commit. If updates do not appear, clear OpenCode's package cache or reinstall the plugin.
 
 To pin a specific version, use a branch or tag:
 
@@ -92,17 +94,23 @@ To pin a specific version, use a branch or tag:
 
 The plugin does two things:
 
-1. **Injects bootstrap context** via the `experimental.chat.system.transform` hook, adding Superpowers Plus awareness to every conversation.
+1. **Injects bootstrap context** via the `experimental.chat.messages.transform` hook, adding Superpowers Plus awareness to every conversation.
 2. **Registers the skills directory** via the `config` hook, so OpenCode discovers all Superpowers Plus skills without symlinks or manual config.
 
 ### Tool Mapping
 
-Skills written for Claude Code are automatically adapted for OpenCode:
+Skills speak in actions rather than naming any one runtime's tools. On OpenCode these resolve to:
 
-- `TodoWrite` → `todowrite`
-- `Task` with subagents → OpenCode's `@mention` system
-- `Skill` tool → OpenCode's native `skill` tool
-- File operations → Native OpenCode tools
+- "Create a todo" / "mark complete in todo list" → `todowrite`
+- `Subagent (general-purpose):` template → OpenCode's `task` tool with `subagent_type: "general"` (or `"explore"` for codebase exploration)
+- "Invoke a skill" → OpenCode's native `skill` tool
+- "Read a file" → `read`
+- "Create a file" / "edit a file" / "delete a file" → `apply_patch`
+- "Run a shell command" → `bash`
+- "Search file contents" / "find files by name" → `grep`, `glob`
+- "Fetch a URL" → `webfetch`
+
+(Verified against the installed OpenCode CLI's tool inventory.)
 
 ## Troubleshooting
 
@@ -112,6 +120,22 @@ Skills written for Claude Code are automatically adapted for OpenCode:
 2. Verify the plugin line in your `opencode.json` is correct
 3. Make sure you're running a recent version of OpenCode
 
+### Windows install issues
+
+Some Windows OpenCode builds have upstream installer issues with git-backed plugin specs, including cache paths for `git+https` URLs and Bun not finding `git.exe` even when it works in a normal terminal. If OpenCode cannot install the plugin, try installing with system npm and pointing OpenCode at the local package:
+
+```powershell
+npm install superpowers-plus@git+https://github.com/xhyqaq/superpowers-plus.git --prefix "$HOME\.config\opencode"
+```
+
+Then use the installed package path in `opencode.json`:
+
+```json
+{
+  "plugin": ["~/.config/opencode/node_modules/superpowers-plus"]
+}
+```
+
 ### Skills not found
 
 1. Use OpenCode's `skill` tool to list available skills
@@ -120,7 +144,7 @@ Skills written for Claude Code are automatically adapted for OpenCode:
 
 ### Bootstrap not appearing
 
-1. Check OpenCode version supports `experimental.chat.system.transform` hook
+1. Check OpenCode version supports `experimental.chat.messages.transform` hook
 2. Restart OpenCode after config changes
 
 ## Getting Help

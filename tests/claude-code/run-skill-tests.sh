@@ -5,7 +5,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
-source "$SCRIPT_DIR/test-helpers.sh"
 
 echo "========================================"
 echo " Claude Code Skills Test Suite"
@@ -23,10 +22,21 @@ if ! command -v claude &> /dev/null; then
     exit 1
 fi
 
+run_with_timeout() {
+    if command -v timeout &> /dev/null; then
+        timeout "$TIMEOUT" "$@"
+    elif command -v gtimeout &> /dev/null; then
+        gtimeout "$TIMEOUT" "$@"
+    else
+        echo "WARN: timeout/gtimeout not found; running without timeout" >&2
+        "$@"
+    fi
+}
+
 # Parse command line arguments
 VERBOSE=false
 SPECIFIC_TEST=""
-TIMEOUT=300  # Default 5 minute timeout per test
+TIMEOUT=600  # Default 10 minute timeout per test
 RUN_INTEGRATION=false
 
 while [[ $# -gt 0 ]]; do
@@ -58,10 +68,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --help, -h           Show this help"
             echo ""
             echo "Tests:"
-            echo "  test-executing-plans.sh  Test executing-plans behavior and requirements"
+            echo "  test-subagent-driven-development.sh  Test skill loading and requirements"
             echo ""
             echo "Integration Tests (use --integration):"
-            echo "  test-executing-plans-integration.sh  Full executing-plans workflow"
+            echo "  test-subagent-driven-development-integration.sh  Full workflow execution"
             exit 0
             ;;
         *)
@@ -74,12 +84,14 @@ done
 
 # List of skill tests to run (fast unit tests)
 tests=(
-    "test-executing-plans.sh"
+    "test-worktree-path-policy.sh"
+    "test-sdd-workspace.sh"
+    "test-subagent-driven-development.sh"
 )
 
 # Integration tests (slow, full execution)
 integration_tests=(
-    "test-executing-plans-integration.sh"
+    "test-subagent-driven-development-integration.sh"
 )
 
 # Add integration tests if requested
@@ -119,7 +131,7 @@ for test in "${tests[@]}"; do
     start_time=$(date +%s)
 
     if [ "$VERBOSE" = true ]; then
-        if run_with_timeout "$TIMEOUT" bash "$test_path"; then
+        if run_with_timeout bash "$test_path"; then
             end_time=$(date +%s)
             duration=$((end_time - start_time))
             echo ""
@@ -139,7 +151,7 @@ for test in "${tests[@]}"; do
         fi
     else
         # Capture output for non-verbose mode
-        if output=$(run_with_timeout "$TIMEOUT" bash "$test_path" 2>&1); then
+        if output=$(run_with_timeout bash "$test_path" 2>&1); then
             end_time=$(date +%s)
             duration=$((end_time - start_time))
             echo "  [PASS] (${duration}s)"

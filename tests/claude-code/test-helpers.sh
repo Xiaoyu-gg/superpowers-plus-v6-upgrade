@@ -1,39 +1,17 @@
 #!/usr/bin/env bash
 # Helper functions for Claude Code skill tests
 
-timeout_cmd() {
-    if command -v timeout >/dev/null 2>&1; then
-        printf '%s\n' "timeout"
-        return 0
-    fi
-
-    if command -v gtimeout >/dev/null 2>&1; then
-        printf '%s\n' "gtimeout"
-        return 0
-    fi
-
-    if command -v perl >/dev/null 2>&1; then
-        printf '%s\n' "perl"
-        return 0
-    fi
-
-    return 1
-}
-
 run_with_timeout() {
-    local timeout_seconds="$1"
+    local seconds="$1"
     shift
 
-    local timeout_tool
-    timeout_tool="$(timeout_cmd)" || {
-        echo "ERROR: timeout, gtimeout, or perl is required to run tests" >&2
-        return 127
-    }
-
-    if [ "$timeout_tool" = "perl" ]; then
-        perl -e 'alarm shift @ARGV; exec @ARGV' "$timeout_seconds" "$@"
+    if command -v timeout &> /dev/null; then
+        timeout "$seconds" "$@"
+    elif command -v gtimeout &> /dev/null; then
+        gtimeout "$seconds" "$@"
     else
-        "$timeout_tool" "$timeout_seconds" "$@"
+        echo "WARN: timeout/gtimeout not found; running without timeout" >&2
+        "$@"
     fi
 }
 
@@ -45,14 +23,14 @@ run_claude() {
     local allowed_tools="${3:-}"
     local output_file=$(mktemp)
 
-    # Build command
-    local cmd="claude -p \"$prompt\""
+    # Build command as an argv array so timeout wraps claude directly.
+    local cmd=(claude -p "$prompt")
     if [ -n "$allowed_tools" ]; then
-        cmd="$cmd --allowed-tools=$allowed_tools"
+        cmd+=(--allowed-tools="$allowed_tools")
     fi
 
-    # Run Claude in headless mode with timeout
-    if run_with_timeout "$timeout" bash -c "$cmd" > "$output_file" 2>&1; then
+    # Run Claude in headless mode with timeout when the platform provides one
+    if run_with_timeout "$timeout" "${cmd[@]}" > "$output_file" 2>&1; then
         cat "$output_file"
         rm -f "$output_file"
         return 0
@@ -228,8 +206,8 @@ EOF
 }
 
 # Export functions for use in tests
-export -f run_claude
 export -f run_with_timeout
+export -f run_claude
 export -f assert_contains
 export -f assert_not_contains
 export -f assert_count

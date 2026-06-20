@@ -1,7 +1,7 @@
 {
   "name": "superpowers-plus",
   "description": "Superpowers Plus core skills library for Claude Code: planning, execution routing, TDD, debugging, and collaboration workflows",
-  "version": "5.0.6",
+  "version": "6.0.3",
   "author": {
     "name": "Jesse Vincent",
     "email": "jesse@fsck.com"
